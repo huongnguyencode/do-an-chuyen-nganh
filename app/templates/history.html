@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Lịch sử bài nộp · Luyện Python{% endblock %}
+{% block content %}
+  <section class="hero compact">
+    <p class="eyebrow">Theo dõi tiến trình</p>
+    <h1>Lịch sử bài nộp</h1>
+    <p>Mỗi mục là một snapshot mã nguồn; lần nộp mới không ghi đè kết quả cũ.</p>
+  </section>
+  <section class="history-list">
+    {% for item in history %}
+      <article class="history-card">
+        <div class="history-heading">
+          <div>
+            <a href="/ui/problems/{{ item.problem_slug }}"><strong>{{ item.problem_title }}</strong></a>
+            <span>#{{ item.submission_id }} · {{ item.submitted_at }}</span>
+          </div>
+          {% if item.runs %}
+            {% set latest = item.runs[0] %}
+            <span class="status-pill {{ 'success' if latest.all_passed else ('danger' if latest.status == 'completed' else 'neutral') }}">
+              {{ latest.status }}{% if latest.status == 'completed' %} · {{ latest.passed_count }}/{{ latest.expected_test_count }}{% endif %}
+            </span>
+          {% endif %}
+        </div>
+        <details>
+          <summary>Xem mã nguồn</summary>
+          <pre><code>{{ item.source_code }}</code></pre>
+        </details>
+      </article>
+    {% else %}
+      <p class="empty-state">Bạn chưa nộp bài nào.</p>
+    {% endfor %}
+  </section>
+{% endblock %}

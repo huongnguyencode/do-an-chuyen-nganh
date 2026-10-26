@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Luyện Python{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/ui/problems">Python Practice</a>
+      <nav aria-label="Điều hướng chính">
+        <a href="/ui/problems">Bài tập</a>
+        <a href="/ui/history">Lịch sử</a>
+      </nav>
+      <span class="student">Sinh viên: {{ student.login_name }}</span>
+    </header>
+    <main class="page-shell">
+      {% block content %}{% endblock %}
+    </main>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

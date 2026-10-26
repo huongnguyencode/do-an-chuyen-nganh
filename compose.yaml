@@ -1,0 +1,72 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-python_poc}
+      POSTGRES_USER: ${POSTGRES_USER:-python_poc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-python_poc}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://python_poc:python_poc@db:5432/python_poc}
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  test:
+    build: .
+    profiles: ["test"]
+    environment:
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg://python_poc:python_poc@db:5432/python_poc_test
+      PGPASSWORD: ${POSTGRES_PASSWORD:-python_poc}
+    command:
+      - sh
+      - -c
+      - >-
+        set -eu;
+        if ! psql -h db -U $${POSTGRES_USER:-python_poc} -d postgres
+        -tc "SELECT 1 FROM pg_database WHERE datname = 'python_poc_test'"
+        | grep -q 1; then
+        psql -h db -U $${POSTGRES_USER:-python_poc} -d postgres
+        -c "CREATE DATABASE python_poc_test";
+        fi;
+        alembic upgrade head;
+        alembic downgrade base;
+        alembic upgrade head;
+        python -m pytest
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    build: .
+    profiles: ["grading"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://python_poc:python_poc@db:5432/python_poc}
+    entrypoint: ["python", "-m", "app.worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

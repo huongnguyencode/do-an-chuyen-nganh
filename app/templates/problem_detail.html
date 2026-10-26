@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ problem.title }} · Luyện Python{% endblock %}
+{% block content %}
+  <div class="two-column">
+    <section class="panel statement-panel">
+      <p class="eyebrow">{{ problem.source_key }} · phiên bản {{ problem.version }}</p>
+      <h1>{{ problem.title }}</h1>
+      <p>{{ problem.statement }}</p>
+      <h2>Chữ ký hàm</h2>
+      <pre><code>{{ problem.function_signature }}</code></pre>
+      <h2>Ràng buộc</h2>
+      <p>{{ problem.constraints_text }}</p>
+      <h2>Ví dụ công khai</h2>
+      <div class="examples">
+        {% for test in public_tests %}
+          <article class="example">
+            <strong>Test {{ test.test_index }} — {{ test.purpose }}</strong>
+            <div><span>Đối số</span><code>{{ test.arguments_json | tojson }}</code></div>
+            <div><span>Kết quả</span><code>{{ test.expected_json | tojson }}</code></div>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="panel editor-panel" data-problem-id="{{ problem.id }}">
+      <div class="editor-heading">
+        <div>
+          <p class="eyebrow">Mã của bạn</p>
+          <h2>Trình soạn thảo</h2>
+        </div>
+        <span id="submission-state" class="status-pill neutral">Chưa nộp</span>
+      </div>
+      <label class="sr-only" for="source-code">Mã nguồn Python</label>
+      <textarea id="source-code" spellcheck="false">def {{ problem.function_signature }}:
+    pass</textarea>
+      <div class="editor-actions">
+        <button id="submit-code" class="button primary" type="button">Nộp bài</button>
+        <span id="submit-message" role="status"></span>
+      </div>
+      <section id="grading-result" class="result-box" hidden>
+        <h3>Kết quả chấm</h3>
+        <p id="result-summary"></p>
+        <div id="public-results"></div>
+      </section>
+      <p class="privacy-note">Test ẩn chỉ được tính vào kết quả tổng hợp; hệ thống không hiển thị dữ liệu test ẩn.</p>
+    </section>
+  </div>
+{% endblock %}
+{% block scripts %}
+  <script src="{{ url_for('static', path='/problem.js') }}" defer></script>
+{% endblock %}

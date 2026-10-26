@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Danh sách bài tập · Luyện Python{% endblock %}
+{% block content %}
+  <section class="hero">
+    <p class="eyebrow">Bộ bài tự luyện</p>
+    <h1>20 bài Python từ cơ bản đến trung bình</h1>
+    <p>Viết đúng hàm được yêu cầu, nộp nhiều lần và theo dõi kết quả của từng phiên bản mã.</p>
+  </section>
+  <section class="problem-grid" aria-label="Danh sách bài tập">
+    {% for problem in problems %}
+      <article class="problem-card">
+        <span class="problem-code">{{ problem.source_key }}</span>
+        <h2>{{ problem.title }}</h2>
+        <code>{{ problem.function_signature }}</code>
+        <a class="button secondary" href="/ui/problems/{{ problem.slug }}">Mở bài</a>
+      </article>
+    {% else %}
+      <p class="empty-state">Chưa có bài tập được công bố.</p>
+    {% endfor %}
+  </section>
+{% endblock %}
