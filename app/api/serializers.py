@@ -4,11 +4,51 @@ from sqlalchemy.orm import Session
 from app.api.schemas import (
     GradingRunResponse,
     GradingSummary,
+    HintRequestResponse,
+    HistoryHintItem,
     HistoryRun,
     PublicTestResult,
+    QuotaStatusResponse,
     SubmissionHistoryItem,
 )
-from app.models import GradingRun, Problem, Submission, TestCase, TestResult
+from app.hints.service import QuotaStatusView
+from app.models import GradingRun, HintRequest, Problem, Submission, TestCase, TestResult
+
+
+def serialize_quota_status(view: QuotaStatusView) -> QuotaStatusResponse:
+    return QuotaStatusResponse(
+        problem_id=view.problem_id,
+        used_count=view.used_count,
+        max_quota=view.max_quota,
+        remaining_count=view.remaining_count,
+        next_level=view.next_level,
+        cooldown_remaining_seconds=view.cooldown_remaining_seconds,
+        next_allowed_at=view.next_allowed_at,
+        has_processing_request=view.has_processing_request,
+    )
+
+
+def serialize_hint_request(
+    req: HintRequest,
+    quota_view: QuotaStatusView,
+) -> HintRequestResponse:
+    return HintRequestResponse(
+        request_id=req.id,
+        submission_id=req.submission_id,
+        grading_run_id=req.grading_run_id,
+        problem_id=req.problem_id,
+        request_key=req.request_key,
+        level=req.level,  # type: ignore[arg-type]
+        status=req.status,
+        hint_text=req.hint_text if req.status == "succeeded" else None,
+        error_code=req.error_code,
+        is_leaked=req.is_leaked,
+        prompt_version=req.prompt_version,
+        model_id=req.model_id,
+        created_at=req.created_at,
+        completed_at=req.completed_at,
+        quota=serialize_quota_status(quota_view),
+    )
 
 
 def serialize_grading_run(db: Session, run: GradingRun) -> GradingRunResponse:
@@ -105,6 +145,34 @@ def serialize_history(db: Session, student_id: int) -> list[SubmissionHistoryIte
                 finished_at=run.finished_at,
             )
         )
+
+    saved_hints = list(
+        db.scalars(
+            select(HintRequest)
+            .where(
+                HintRequest.student_id == student_id,
+                HintRequest.submission_id.in_(submission_ids),
+                HintRequest.status == "succeeded",
+            )
+            .order_by(HintRequest.created_at.asc(), HintRequest.id.asc())
+        )
+    )
+    hints_by_submission: dict[int, list[HistoryHintItem]] = {}
+    for hint in saved_hints:
+        if hint.hint_text:
+            hints_by_submission.setdefault(hint.submission_id, []).append(
+                HistoryHintItem(
+                    request_id=hint.id,
+                    grading_run_id=hint.grading_run_id,
+                    level=hint.level,  # type: ignore[arg-type]
+                    hint_text=hint.hint_text,
+                    prompt_version=hint.prompt_version,
+                    model_id=hint.model_id,
+                    created_at=hint.created_at,
+                    completed_at=hint.completed_at,
+                )
+            )
+
     return [
         SubmissionHistoryItem(
             submission_id=submission.id,
@@ -114,6 +182,7 @@ def serialize_history(db: Session, student_id: int) -> list[SubmissionHistoryIte
             source_code=submission.source_code,
             submitted_at=submission.created_at,
             runs=runs_by_submission.get(submission.id, []),
+            hints=hints_by_submission.get(submission.id, []),
         )
         for submission in submissions
     ]

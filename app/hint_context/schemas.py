@@ -45,3 +45,6 @@ class HintContextV1(BaseModel):
     student_code: str
     grading: GradingContext
     evidence: list[Evidence]
+    hidden_failure_categories: list[str] = Field(default_factory=list)
+    hidden_failure_statuses: list[str] = Field(default_factory=list)
+    previous_hints: list[str] = Field(default_factory=list)

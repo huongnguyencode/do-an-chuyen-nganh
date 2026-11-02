@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import logging
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -43,12 +43,49 @@ def _limited_message(value: str | None) -> str | None:
 
 
 class GradingService:
-    def __init__(self, session_factory: sessionmaker[Session], judge: JudgeClient) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session],
+        judge: JudgeClient,
+        *,
+        stale_run_timeout_seconds: int = 180,
+        now_fn: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
         self.session_factory = session_factory
         self.judge = judge
+        self.stale_run_timeout_seconds = stale_run_timeout_seconds
+        self.now_fn = now_fn
+
+    def _expire_stale_running_runs(self, db: Session, now: datetime) -> None:
+        if self.stale_run_timeout_seconds <= 0:
+            return
+        cutoff = now - timedelta(seconds=self.stale_run_timeout_seconds)
+        stale_runs = list(
+            db.scalars(
+                select(GradingRun)
+                .where(
+                    GradingRun.status == "running",
+                    GradingRun.started_at.is_not(None),
+                    GradingRun.started_at <= cutoff,
+                )
+                .with_for_update(skip_locked=True)
+            )
+        )
+        for stale in stale_runs:
+            stale.status = "technical_error"
+            stale.all_passed = None
+            stale.technical_error_code = "worker_run_expired"
+            stale.finished_at = now
+            logger.warning(
+                "grading_run_expired grading_run_id=%s problem_id=%s",
+                stale.id,
+                stale.problem_id,
+            )
 
     def claim_next(self) -> ClaimedRun | None:
+        now = self.now_fn()
         with self.session_factory.begin() as db:
+            self._expire_stale_running_runs(db, now)
             run = db.execute(
                 select(GradingRun)
                 .where(GradingRun.status == "queued")
@@ -59,13 +96,13 @@ class GradingService:
             if run is None:
                 return None
             run.status = "running"
-            run.started_at = datetime.now(UTC)
+            run.started_at = now
             submission = db.get(Submission, run.submission_id)
             problem = db.get(Problem, run.problem_id)
             if submission is None or problem is None:
                 run.status = "technical_error"
                 run.technical_error_code = "grading_data_missing"
-                run.finished_at = datetime.now(UTC)
+                run.finished_at = now
                 return None
             test_rows = db.execute(
                 select(TestCase)
@@ -94,6 +131,46 @@ class GradingService:
                 tests=tests,
             )
 
+    def _execute_single_test(
+        self, claimed: ClaimedRun, test: dict[str, Any]
+    ) -> dict[str, Any]:
+        program = build_harness(
+            claimed.source_code,
+            claimed.function_name,
+            test["arguments"],
+        )
+        try:
+            execution = self.judge.execute(program.source_code)
+            return self._normalize(execution, program.nonce, test["expected"])
+        except Judge0Error as exc:
+            return {
+                "status": "infrastructure_error",
+                "actual_json": None,
+                "error_summary": str(exc),
+                "judge0_token": None,
+                "duration_ms": None,
+            }
+
+    @classmethod
+    def _unexecuted_result(
+        cls,
+        claimed: ClaimedRun,
+        test_case_id: int,
+        status: str,
+        error_summary: str | None,
+    ) -> dict[str, Any]:
+        return cls._result_values(
+            claimed,
+            test_case_id,
+            {
+                "status": status,
+                "actual_json": None,
+                "error_summary": error_summary,
+                "judge0_token": None,
+                "duration_ms": None,
+            },
+        )
+
     def process_next(self) -> bool:
         claimed = self.claim_next()
         if claimed is None:
@@ -115,52 +192,84 @@ class GradingService:
 
         result_rows: list[dict[str, Any]] = []
         technical_error = False
-        for position, test in enumerate(claimed.tests):
-            program = build_harness(
-                claimed.source_code,
-                claimed.function_name,
-                test["arguments"],
-            )
-            try:
-                execution = self.judge.execute(program.source_code)
-                normalized = self._normalize(execution, program.nonce, test["expected"])
-            except Judge0Error as exc:
-                normalized = {
-                    "status": "infrastructure_error",
-                    "actual_json": None,
-                    "error_summary": str(exc),
-                    "judge0_token": None,
-                    "duration_ms": None,
-                }
-                technical_error = True
-            if normalized["status"] in {"infrastructure_error", "incomplete"}:
-                technical_error = True
-            result_rows.append(self._result_values(claimed, test["id"], normalized))
-            logger.info(
-                "test_normalized grading_run_id=%s problem_id=%s test_index=%s "
-                "status=%s judge0_token=%s",
-                claimed.grading_run_id,
-                claimed.problem_id,
-                test["test_index"],
-                normalized["status"],
-                normalized["judge0_token"],
-            )
-            if technical_error:
-                for remaining in claimed.tests[position + 1 :]:
-                    result_rows.append(
-                        self._result_values(
-                            claimed,
-                            remaining["id"],
-                            {
-                                "status": "incomplete",
-                                "actual_json": None,
-                                "error_summary": "not_run_after_infrastructure_error",
-                                "judge0_token": None,
-                                "duration_ms": None,
-                            },
-                        )
+
+        # Bước 1: Chạy Canary Test 1 để bắt sớm lỗi cú pháp (syntax_error) hoặc lỗi hạ tầng Judge0
+        first_test = claimed.tests[0]
+        first_norm = self._execute_single_test(claimed, first_test)
+        result_rows.append(self._result_values(claimed, first_test["id"], first_norm))
+
+        if first_norm["status"] in {"infrastructure_error", "incomplete"}:
+            technical_error = True
+            for remaining in claimed.tests[1:]:
+                result_rows.append(
+                    self._unexecuted_result(
+                        claimed,
+                        remaining["id"],
+                        "incomplete",
+                        "not_run_after_infrastructure_error",
                     )
-                break
+                )
+        elif first_norm["status"] == "syntax_error":
+            # Short-circuit: Mã nguồn lỗi cú pháp không thể compile(), không gọi thêm 7 request Judge0.
+            # Đặt judge0_token=None và duration_ms=None để giữ nguyên tính toàn vẹn Audit Trail.
+            for remaining in claimed.tests[1:]:
+                result_rows.append(
+                    self._unexecuted_result(
+                        claimed,
+                        remaining["id"],
+                        "syntax_error",
+                        first_norm["error_summary"],
+                    )
+                )
+        elif len(claimed.tests) > 1:
+            remaining_tests = claimed.tests[1:]
+            batch_fn = getattr(self.judge, "execute_batch", None)
+            if callable(batch_fn):
+                programs = [
+                    build_harness(
+                        claimed.source_code,
+                        claimed.function_name,
+                        test["arguments"],
+                    )
+                    for test in remaining_tests
+                ]
+                try:
+                    executions = batch_fn([prog.source_code for prog in programs])
+                    for test, prog, execution in zip(
+                        remaining_tests, programs, executions, strict=True
+                    ):
+                        norm = self._normalize(execution, prog.nonce, test["expected"])
+                        if norm["status"] in {"infrastructure_error", "incomplete"}:
+                            technical_error = True
+                        result_rows.append(self._result_values(claimed, test["id"], norm))
+                except Judge0Error as exc:
+                    technical_error = True
+                    for idx, test in enumerate(remaining_tests):
+                        result_rows.append(
+                            self._unexecuted_result(
+                                claimed,
+                                test["id"],
+                                "infrastructure_error" if idx == 0 else "incomplete",
+                                str(exc) if idx == 0 else "not_run_after_infrastructure_error",
+                            )
+                        )
+            else:
+                for position, test in enumerate(remaining_tests):
+                    normalized = self._execute_single_test(claimed, test)
+                    if normalized["status"] in {"infrastructure_error", "incomplete"}:
+                        technical_error = True
+                    result_rows.append(self._result_values(claimed, test["id"], normalized))
+                    if technical_error:
+                        for rest in remaining_tests[position + 1 :]:
+                            result_rows.append(
+                                self._unexecuted_result(
+                                    claimed,
+                                    rest["id"],
+                                    "incomplete",
+                                    "not_run_after_infrastructure_error",
+                                )
+                            )
+                        break
 
         self._persist_results(claimed, result_rows, technical_error)
         logger.info(
@@ -233,6 +342,7 @@ class GradingService:
         result_rows: list[dict[str, Any]],
         technical_error: bool,
     ) -> None:
+        now = self.now_fn()
         with self.session_factory.begin() as db:
             run = db.execute(
                 select(GradingRun)
@@ -248,7 +358,7 @@ class GradingService:
                         constraint="uq_test_result_run_test"
                     )
                 )
-            run.finished_at = datetime.now(UTC)
+            run.finished_at = now
             if technical_error or any(
                 row["status"] in {"infrastructure_error", "incomplete"}
                 for row in result_rows
@@ -263,6 +373,7 @@ class GradingService:
                 )
 
     def _finish_technical_error(self, run_id: int, error_code: str) -> None:
+        now = self.now_fn()
         with self.session_factory.begin() as db:
             run = db.execute(
                 select(GradingRun).where(GradingRun.id == run_id).with_for_update()
@@ -271,4 +382,4 @@ class GradingService:
                 run.status = "technical_error"
                 run.all_passed = None
                 run.technical_error_code = error_code
-                run.finished_at = datetime.now(UTC)
+                run.finished_at = now

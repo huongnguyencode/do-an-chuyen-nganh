@@ -10,7 +10,7 @@ from app.hint_context.schemas import (
     ProblemContext,
     PublicEvidence,
 )
-from app.models import GradingRun, Problem, Submission, TestCase, TestResult
+from app.models import GradingRun, HintRequest, Problem, Submission, TestCase, TestResult
 
 
 class HintEligibilityError(ValueError):
@@ -86,9 +86,22 @@ def build_hint_context(
         for result, test in failed_rows
         if test.is_public
     ][:max_evidence]
+
+    hidden_categories: list[str] = []
+    hidden_statuses: list[str] = []
+
     if public_failures:
         evidence = public_failures
     else:
+        # Chỉ trích xuất nhãn phạm trù của test ẩn khi sinh viên đã đạt 100% test công khai
+        hidden_failed_rows = [
+            (result, test) for result, test in failed_rows if not test.is_public
+        ]
+        for result, test in hidden_failed_rows:
+            if test.purpose and test.purpose not in hidden_categories:
+                hidden_categories.append(test.purpose)
+            if result.status and result.status not in hidden_statuses:
+                hidden_statuses.append(result.status)
         evidence = [
             HiddenSummaryEvidence(
                 summary=(
@@ -97,6 +110,28 @@ def build_hint_context(
                 )
             )
         ]
+
+    prior_hint_rows = db.execute(
+        select(HintRequest.submission_id, HintRequest.level, HintRequest.hint_text)
+        .where(
+            HintRequest.student_id == student_id,
+            HintRequest.problem_id == problem.id,
+            HintRequest.status == "succeeded",
+            HintRequest.hint_text.is_not(None),
+        )
+        .order_by(HintRequest.id)
+    ).all()
+
+    prior_hints: list[str] = []
+    for req_sub_id, req_level, req_text in prior_hint_rows:
+        if not req_text:
+            continue
+        scope_tag = (
+            "Cùng bản nộp hiện tại"
+            if req_sub_id == submission.id
+            else "Bản nộp cũ trước khi sinh viên sửa code"
+        )
+        prior_hints.append(f"[{scope_tag} · mức {req_level}] {req_text}")
 
     return HintContextV1(
         problem_id=problem.id,
@@ -116,4 +151,7 @@ def build_hint_context(
             failed_count=len(failed_rows),
         ),
         evidence=evidence,
+        hidden_failure_categories=hidden_categories[:max_evidence],
+        hidden_failure_statuses=hidden_statuses,
+        previous_hints=prior_hints,
     )

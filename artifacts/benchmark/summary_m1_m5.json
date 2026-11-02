@@ -1,0 +1,22 @@
+{
+  "N_total_requests": 40,
+  "S_succeeded_requests": 40,
+  "success_rate_S_over_N": 1.0,
+  "guardrail_flagged_requests": 0,
+  "guardrail_flagged_rate_over_N": 0.0,
+  "M1_cause_accuracy": null,
+  "M1_cause_accuracy_KM": null,
+  "M1_cause_accuracy_KH": null,
+  "M2_level_compliance": null,
+  "M3_leakage_rate": null,
+  "M3_leakage_rate_over_N": null,
+  "M3_borderline_r5_eq_1_count": null,
+  "M4_usefulness_mean": null,
+  "M4_usefulness_distribution": null,
+  "M5_latency_ms": {
+    "succeeded_median_ms": 15.0,
+    "succeeded_p95_ms": 15.0,
+    "failed_median_ms": null,
+    "failed_p95_ms": null
+  }
+}

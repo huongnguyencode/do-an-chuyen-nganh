@@ -30,7 +30,7 @@ def test_problem_page_renders_all_twenty_problems(clean_database: None) -> None:
     assert "Kiểm tra ngoặc cân bằng" in response.text
 
 
-def test_detail_page_has_editor_and_no_hidden_or_fake_hint_content(
+def test_detail_page_has_editor_and_scaffolding_hint_panel_without_hidden_tests(
     clean_database: None,
 ) -> None:
     prepare_ui()
@@ -40,9 +40,10 @@ def test_detail_page_has_editor_and_no_hidden_or_fake_hint_content(
     assert response.status_code == 200
     assert 'id="source-code"' in response.text
     assert 'id="submit-code"' in response.text
+    assert 'id="request-hint"' in response.text
+    assert 'id="quota-badge"' in response.text
     assert "Danh sách dài hơn để phát hiện return sớm" not in response.text
     assert "Tạo gợi ý AI" not in response.text
-    assert "Cần trợ giúp" not in response.text
 
 
 def test_history_escapes_student_source_code(clean_database: None) -> None:

@@ -13,8 +13,13 @@ logger = logging.getLogger(__name__)
 
 
 def run(*, once: bool, idle_seconds: float) -> None:
-    judge = Judge0Client(get_settings())
-    service = GradingService(SessionLocal, judge)
+    settings = get_settings()
+    judge = Judge0Client(settings)
+    service = GradingService(
+        SessionLocal,
+        judge,
+        stale_run_timeout_seconds=settings.grading_stale_run_timeout_seconds,
+    )
     while True:
         processed = service.process_next()
         if once:
