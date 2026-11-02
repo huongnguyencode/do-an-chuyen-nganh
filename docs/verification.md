@@ -39,9 +39,6 @@ Các assertion hiện có:
 - không thể đặt `all_passed=true` khi lượt chấm có 0 test;
 - lượt chấm `completed` bắt buộc có verdict.
 
-Chưa có số liệu Judge0, số bài seed hoặc kết quả chấm vì các phần đó chưa được
-triển khai trong Phần 1.
-
 ## Phần 2 — P01 và worker Judge0
 
 | Kiểm tra | Kết quả hiện tại |
@@ -56,11 +53,6 @@ triển khai trong Phần 1.
 | Test client token/polling/HTTP/timeout bằng MockTransport | PASS |
 | Test worker với fake Judge0 và PostgreSQL | PASS |
 | Smoke test Judge0 thật | PASS với Judge0 CE công khai, Python 3.12.5 (language ID 100) |
-
-Test đã được viết cho so sánh có xét kiểu, envelope/nonce sai, output giả,
-output thiếu như `sys.exit`/kết thúc sớm, polling timeout, lỗi HTTP, mã đúng, sai
-kết quả, syntax error, runtime error, TLE, lỗi hạ tầng và idempotency của worker.
-Các test trên đã chạy thành công trong lượt pytest 48/48 ngày 26/10/2026.
 
 ### Smoke test Judge0 thật cho P01
 
@@ -145,7 +137,20 @@ Kết quả: `PASS catalog: 20 problems, 160 independently verified tests`.
 | Mã sinh viên được HTML escape trong lịch sử | PASS |
 | Build image test sau Phần 6 | PASS |
 
-Tổng kết lượt chạy: pytest thu thập 48 ca, **48 passed**, 11 cảnh báo trong
-8.79 giây. Các cảnh báo gồm cảnh báo tương thích TestClient, pytest thử thu thập
-model có tên bắt đầu bằng `Test`, và ba cảnh báo rollback fixture; không có test
-thất bại.
+Tổng kết lượt chạy trước Phần 7: pytest thu thập 48 ca, **48 passed**, 11 cảnh báo trong
+8.79 giây.
+
+## Phần 7 — Module LLM Sư phạm (KM/KH), Output Guardrail, Quota/Cooldown & Benchmark Framework
+
+Ngày kiểm tra: 02/11/2026 (Python 3.12.6 trên Windows `.venv`).
+
+| Kiểm tra | Lệnh thực thi | Kết quả thực tế |
+| --- | --- | --- |
+| Biên dịch cú pháp toàn bộ `app`, `alembic`, `tests`, `scripts` | `py -3.12 -m compileall -q app alembic tests scripts` | PASS (exit code 0) |
+| PoC Chương 2 (Hải Anh) — Execution Harness Base64 + Nonce trên 5 kịch bản `TC01–TC05` | `py -3.12 scripts/poc_mbpp_harness.py` | PASS: `TC01` (`value: 9`), `TC02` (`value: 2`), `TC03` (`syntax_error`), `TC04` (`value: 0`, bỏ qua stdout JSON giả mạo), `TC05` (`SystemExit`) |
+| PoC Chương 2 (Bảo) — Prompt Framing `v1.0`, chống thoát thẻ XML, Output Guardrail & Retry (`max_retries=2`) | `.\.venv\Scripts\python.exe scripts/poc_guardrail_and_injection.py` | PASS: `xml_breakout_sanitized=true`, chặn `fenced_code_leak` / `inline_replacement_leak` / `token_overlap_leak`, retry thành công ở lần thử 2 |
+| Chạy Offline Benchmark Pipeline `M1–M5` & xuất CSV chấm chéo Rubric `R1–R5` cho 20 bài (40 mẫu KM + KH) | `.\.venv\Scripts\python.exe scripts/run_benchmark_m1_m5.py --mode fake --limit 20` | PASS: sinh đủ `benchmark_generations.jsonl`, `rubric_evaluation_sheet.csv` (40 dòng), `summary_m1_m5.json` (`N=40, S=40`) |
+| Unit tests không phụ thuộc PostgreSQL (`test_comparison`, `test_harness`, `test_judge0_client`, `test_problem_catalog`, `test_hints_and_guardrail`) | `.\.venv\Scripts\python.exe -m pytest tests/test_comparison.py tests/test_harness.py tests/test_judge0_client.py tests/test_problem_catalog.py tests/test_hints_and_guardrail.py` | PASS: **24 passed in 0.91s** (không còn cảnh báo `PytestCollectionWarning` trên `TestCase`/`TestResult`) |
+| Kiểm tra cú pháp JavaScript giao diện sau tối ưu | `node --check app/static/problem.js` | PASS (exit code 0) |
+| Integration tests `test_hint_quota_integration.py` (Quota 3 lượt, Cooldown 120s, Idempotency, Lease recovery, Refund khi guardrail fail) trên PostgreSQL | `docker compose run --rm test` | CHƯA CHẠY trên máy local hiện tại (cần khởi chạy container PostgreSQL qua Docker Compose) |
+| Benchmark thực nghiệm với `Qwen2.5-Coder-7B-Instruct` trên Colab T4 (`--mode colab`) | `.\.venv\Scripts\python.exe scripts/run_benchmark_m1_m5.py --mode colab --limit 20` | CHƯA CHẠY (cần cấu hình `COLAB_QWEN_BASE_URL` trỏ tới ngrok/cloudflared endpoint trên Google Colab) |

@@ -24,7 +24,7 @@ def clean_database() -> None:
     with SessionLocal.begin() as session:
         session.execute(
             text(
-                "TRUNCATE TABLE test_result, grading_run, submission, test_case, "
-                "problem, student RESTART IDENTITY CASCADE"
+                "TRUNCATE TABLE hint_request, help_quota, test_result, grading_run, "
+                "submission, test_case, problem, student RESTART IDENTITY CASCADE"
             )
         )

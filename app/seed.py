@@ -1,3 +1,5 @@
+import sys
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
@@ -8,10 +10,16 @@ from app.problems.catalog import ALL_PROBLEMS
 
 
 def seed_problem(db: Session, data: dict) -> Problem:
-    problem_values = {key: value for key, value in data.items() if key not in {"tests", "wrong_samples"}}
+    problem_values = {
+        key: value
+        for key, value in data.items()
+        if key not in {"tests", "wrong_samples"}
+    }
     statement = insert(Problem).values(**problem_values)
     inserted_id = db.execute(
-        statement.on_conflict_do_nothing(index_elements=[Problem.slug]).returning(Problem.id)
+        statement.on_conflict_do_nothing(index_elements=[Problem.slug]).returning(
+            Problem.id
+        )
     ).scalar_one_or_none()
     if inserted_id is None:
         problem_id = db.execute(
@@ -30,8 +38,10 @@ def seed_problem(db: Session, data: dict) -> Problem:
             "is_public": test["is_public"],
             "purpose": test["purpose"],
         }
-        test_statement = insert(TestCase).values(**values).on_conflict_do_nothing(
-            constraint="uq_test_case_problem_version_index"
+        test_statement = (
+            insert(TestCase)
+            .values(**values)
+            .on_conflict_do_nothing(constraint="uq_test_case_problem_version_index")
         )
         db.execute(test_statement)
 
@@ -46,6 +56,8 @@ def seed_all(db: Session) -> None:
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     with SessionLocal.begin() as db:
         seed_all(db)
     print("Seed hoàn tất: 20 bài, 160 test và tài khoản demo.")

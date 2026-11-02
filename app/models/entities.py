@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -63,6 +64,7 @@ class Problem(TimestampMixin, Base):
 
 
 class TestCase(Base):
+    __test__ = False
     __tablename__ = "test_case"
     __table_args__ = (
         UniqueConstraint(
@@ -100,6 +102,12 @@ class Submission(TimestampMixin, Base):
         UniqueConstraint(
             "id", "problem_id", "test_version", name="uq_submission_identity_scope"
         ),
+        UniqueConstraint(
+            "id",
+            "student_id",
+            "problem_id",
+            name="uq_submission_student_problem_scope",
+        ),
         CheckConstraint("char_length(source_code) > 0", name="source_code_not_empty"),
         CheckConstraint("problem_version > 0", name="positive_problem_version"),
         CheckConstraint("test_version > 0", name="positive_test_version"),
@@ -132,6 +140,12 @@ class GradingRun(Base):
         ),
         UniqueConstraint(
             "id", "problem_id", "test_version", name="uq_grading_run_identity_scope"
+        ),
+        UniqueConstraint(
+            "id",
+            "submission_id",
+            "problem_id",
+            name="uq_grading_run_submission_problem_scope",
         ),
         Index("ix_grading_run_status_id", "status", "id"),
         CheckConstraint(
@@ -171,6 +185,7 @@ class GradingRun(Base):
 
 
 class TestResult(Base):
+    __test__ = False
     __tablename__ = "test_result"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -207,3 +222,120 @@ class TestResult(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer)
 
     grading_run: Mapped[GradingRun] = relationship(back_populates="test_results")
+
+
+class HelpQuota(Base):
+    __tablename__ = "help_quota"
+    __table_args__ = (
+        CheckConstraint(
+            "used_count >= 0 AND used_count <= 3",
+            name="valid_used_count",
+        ),
+    )
+
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("student.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    problem_id: Mapped[int] = mapped_column(
+        ForeignKey("problem.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    used_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    next_allowed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    hint_requests: Mapped[list[HintRequest]] = relationship(back_populates="quota")
+
+
+class HintRequest(Base):
+    __tablename__ = "hint_request"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["student_id", "problem_id"],
+            ["help_quota.student_id", "help_quota.problem_id"],
+            name="fk_hint_request_quota_scope_help_quota",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["submission_id", "student_id", "problem_id"],
+            ["submission.id", "submission.student_id", "submission.problem_id"],
+            name="fk_hint_request_submission_scope_submission",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["grading_run_id", "submission_id", "problem_id"],
+            ["grading_run.id", "grading_run.submission_id", "grading_run.problem_id"],
+            name="fk_hint_request_grading_run_scope_grading_run",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "student_id",
+            "request_key",
+            name="uq_hint_request_student_request_key",
+        ),
+        Index(
+            "uq_hint_request_one_processing_per_student_problem",
+            "student_id",
+            "problem_id",
+            unique=True,
+            postgresql_where=text("status = 'processing'"),
+        ),
+        Index("ix_hint_request_submission_created", "submission_id", "created_at"),
+        CheckConstraint("level IN ('KM', 'KH')", name="valid_level"),
+        CheckConstraint(
+            "status IN ('processing', 'succeeded', 'failed')",
+            name="valid_status",
+        ),
+        CheckConstraint(
+            "status <> 'succeeded' OR (hint_text IS NOT NULL AND char_length(hint_text) > 0)",
+            name="succeeded_has_hint_text",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    student_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    problem_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    submission_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    grading_run_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    request_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    level: Mapped[str] = mapped_column(String(10), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="processing"
+    )
+    hint_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_version: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="v1.0", server_default="v1.0"
+    )
+    model_id: Mapped[str] = mapped_column(
+        String(120),
+        nullable=False,
+        default="unconfigured",
+        server_default="unconfigured",
+    )
+    evidence_snapshot: Mapped[dict | list] = mapped_column(JSONB, nullable=False)
+    generation_log: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    is_leaked: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    quota: Mapped[HelpQuota] = relationship(back_populates="hint_requests")

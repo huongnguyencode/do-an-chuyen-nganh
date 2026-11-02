@@ -13,7 +13,7 @@
       <h2>Ví dụ công khai</h2>
       <div class="examples">
         {% for test in public_tests %}
-          <article class="example">
+          <article class="example" data-test-index="{{ test.test_index }}" data-args="{{ test.arguments_json | tojson | forceescape }}" data-expected="{{ test.expected_json | tojson | forceescape }}">
             <strong>Test {{ test.test_index }} — {{ test.purpose }}</strong>
             <div><span>Đối số</span><code>{{ test.arguments_json | tojson }}</code></div>
             <div><span>Kết quả</span><code>{{ test.expected_json | tojson }}</code></div>
@@ -22,7 +22,7 @@
       </div>
     </section>
 
-    <section class="panel editor-panel" data-problem-id="{{ problem.id }}">
+    <section class="panel editor-panel" data-problem-id="{{ problem.id }}" data-problem-slug="{{ problem.slug }}" data-function-name="{{ problem.function_name }}">
       <div class="editor-heading">
         <div>
           <p class="eyebrow">Mã của bạn</p>
@@ -34,6 +34,7 @@
       <textarea id="source-code" spellcheck="false">def {{ problem.function_signature }}:
     pass</textarea>
       <div class="editor-actions">
+        <button id="run-public-samples" class="button secondary" type="button">Chạy thử ví dụ (Client)</button>
         <button id="submit-code" class="button primary" type="button">Nộp bài</button>
         <span id="submit-message" role="status"></span>
       </div>
@@ -42,7 +43,29 @@
         <p id="result-summary"></p>
         <div id="public-results"></div>
       </section>
-      <p class="privacy-note">Test ẩn chỉ được tính vào kết quả tổng hợp; hệ thống không hiển thị dữ liệu test ẩn.</p>
+
+      <section id="hint-section" class="result-box hint-panel">
+        <div class="hint-header">
+          <div>
+            <p class="eyebrow">Hỗ trợ sư phạm (Scaffolding KM / KH)</p>
+            <h3>Gợi ý từ mô hình ngôn ngữ lớn</h3>
+          </div>
+          <span id="quota-badge" class="status-pill neutral">Còn 3/3 lượt</span>
+        </div>
+        <p id="quota-detail" class="hint-meta">
+          Chỉ khả dụng sau khi nộp bài chưa đạt kiểm thử. Lượt 1: KM (Nhận diện lỗi) · Lượt 2–3: KH (Hướng xử lý).
+        </p>
+        <div class="editor-actions">
+          <button id="request-hint" class="button secondary" type="button" disabled>
+            Yêu cầu gợi ý
+          </button>
+          <span id="cooldown-timer" class="hint-cooldown" hidden></span>
+          <span id="hint-message" role="status"></span>
+        </div>
+        <div id="hint-list" class="hint-list"></div>
+      </section>
+
+      <p class="privacy-note">Test ẩn chỉ được tính vào kết quả tổng hợp; hệ thống không hiển thị dữ liệu test ẩn và không gửi giá trị test ẩn vào Prompt AI.</p>
     </section>
   </div>
 {% endblock %}
